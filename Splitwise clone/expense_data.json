@@ -1,33 +1,5 @@
 {
-  "expenses": [
-    {
-      "id": "ba3cf088-a8f4-4227-99ea-57b61555e2ec",
-      "description": "taxi",
-      "amount": 1000.0,
-      "paid_by": [
-        "suveg"
-      ],
-      "paid_amounts": {
-        "suveg": 1000.0
-      },
-      "split_among": [
-        "madhav",
-        "suveg",
-        "ashvini"
-      ],
-      "splits": {
-        "madhav": 333.3333333333333,
-        "suveg": 333.3333333333333,
-        "ashvini": 333.3333333333333
-      },
-      "date": "2025-07-19 01:55:49",
-      "group": "General"
-    }
-  ],
+  "expenses": [],
   "groups": {},
-  "members": [
-    "madhav",
-    "suveg",
-    "ashvini"
-  ]
+  "members": []
 }
