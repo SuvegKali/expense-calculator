@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date
 import json
+import os
 from typing import Dict, List, Tuple
 import uuid
 
@@ -12,19 +13,48 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize session state
-if 'expenses' not in st.session_state:
-    st.session_state.expenses = []
-if 'groups' not in st.session_state:
-    st.session_state.groups = {}
-if 'members' not in st.session_state:
-    st.session_state.members = set()
-
 class ExpenseSplitter:
     def __init__(self):
+        self.data_file = "expense_data.json"
+        self.load_data()
+    
+    def load_data(self):
+        """Load data from JSON file"""
+        try:
+            if os.path.exists(self.data_file):
+                with open(self.data_file, 'r') as f:
+                    data = json.load(f)
+                    st.session_state.expenses = data.get('expenses', [])
+                    st.session_state.groups = data.get('groups', {})
+                    st.session_state.members = set(data.get('members', []))
+            else:
+                # Initialize with empty data if file doesn't exist
+                st.session_state.expenses = []
+                st.session_state.groups = {}
+                st.session_state.members = set()
+        except Exception as e:
+            st.error(f"Error loading data: {e}")
+            # Initialize with empty data on error
+            st.session_state.expenses = []
+            st.session_state.groups = {}
+            st.session_state.members = set()
+        
         self.expenses = st.session_state.expenses
         self.groups = st.session_state.groups
         self.members = st.session_state.members
+    
+    def save_data(self):
+        """Save data to JSON file"""
+        try:
+            data = {
+                'expenses': self.expenses,
+                'groups': self.groups,
+                'members': list(self.members)
+            }
+            with open(self.data_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            st.error(f"Error saving data: {e}")
     
     def add_expense(self, description: str, amount: float, paid_by: List[str], 
                    paid_amounts: Dict[str, float], split_among: List[str], 
@@ -46,8 +76,8 @@ class ExpenseSplitter:
             'id': expense_id,
             'description': description,
             'amount': amount,
-            'paid_by': paid_by,  # Now a list
-            'paid_amounts': paid_amounts,  # How much each payer paid
+            'paid_by': paid_by,
+            'paid_amounts': paid_amounts,
             'split_among': split_among,
             'splits': splits,
             'date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -56,12 +86,32 @@ class ExpenseSplitter:
         
         self.expenses.append(expense)
         st.session_state.expenses = self.expenses
+        self.save_data()  # Save after adding
         return expense_id
     
     def delete_expense(self, expense_id: str):
         """Delete an expense"""
         self.expenses = [exp for exp in self.expenses if exp['id'] != expense_id]
         st.session_state.expenses = self.expenses
+        self.save_data()  # Save after deleting
+    
+    def add_member(self, member_name: str):
+        """Add a new member"""
+        if member_name and member_name not in self.members:
+            self.members.add(member_name)
+            st.session_state.members = self.members
+            self.save_data()  # Save after adding member
+            return True
+        return False
+    
+    def remove_member(self, member_name: str):
+        """Remove a member"""
+        if member_name in self.members:
+            self.members.remove(member_name)
+            st.session_state.members = self.members
+            self.save_data()  # Save after removing member
+            return True
+        return False
     
     def calculate_balances(self, group_filter: str = None) -> Dict[str, float]:
         """Calculate who owes whom with multiple payers support"""
@@ -127,15 +177,56 @@ class ExpenseSplitter:
         if group_name not in self.groups:
             self.groups[group_name] = members
             st.session_state.groups = self.groups
+            self.save_data()  # Save after adding group
             return True
         return False
     
     def get_group_expenses(self, group_name: str) -> List[Dict]:
         """Get expenses for a specific group"""
         return [exp for exp in self.expenses if exp['group'] == group_name]
+    
+    def export_data(self):
+        """Export data as JSON string for backup"""
+        data = {
+            'expenses': self.expenses,
+            'groups': self.groups,
+            'members': list(self.members),
+            'export_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        return json.dumps(data, indent=2)
+    
+    def import_data(self, json_data: str):
+        """Import data from JSON string"""
+        try:
+            data = json.loads(json_data)
+            
+            # Validate data structure
+            if 'expenses' in data and 'members' in data:
+                st.session_state.expenses = data.get('expenses', [])
+                st.session_state.groups = data.get('groups', {})
+                st.session_state.members = set(data.get('members', []))
+                
+                # Update instance variables
+                self.expenses = st.session_state.expenses
+                self.groups = st.session_state.groups
+                self.members = st.session_state.members
+                
+                # Save the imported data
+                self.save_data()
+                return True
+            else:
+                st.error("Invalid data format")
+                return False
+        except json.JSONDecodeError:
+            st.error("Invalid JSON format")
+            return False
+        except Exception as e:
+            st.error(f"Error importing data: {e}")
+            return False
 
 def main():
     st.title("💰 ExpenseSplit")
+    st.markdown("*Your personal expense tracking solution with persistent data storage*")
     
     # Initialize the expense splitter
     splitter = ExpenseSplitter()
@@ -147,10 +238,11 @@ def main():
             new_member = st.text_input("Add member", placeholder="Enter name", key="add_member_input")
         with col2:
             if st.button("Add", key="add_member_btn"):
-                if new_member and new_member not in st.session_state.members:
-                    st.session_state.members.add(new_member)
+                if splitter.add_member(new_member):
                     st.success(f"Added {new_member}")
                     st.rerun()
+                elif new_member:
+                    st.warning(f"{new_member} already exists")
         
         if st.session_state.members:
             st.write("**Current members:**")
@@ -158,10 +250,38 @@ def main():
             for i, member in enumerate(st.session_state.members):
                 with cols[i % 4]:
                     if st.button(f"❌ {member}", key=f"remove_{member}"):
-                        st.session_state.members.remove(member)
+                        splitter.remove_member(member)
                         st.rerun()
     
-    # ========== SECTION 2: ADD EXPENSE ==========
+    # ========== SECTION 2: DATA MANAGEMENT ==========
+    with st.expander("💾 Data Management"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📤 Export Data**")
+            if st.button("Export to JSON", key="export_btn"):
+                export_data = splitter.export_data()
+                st.download_button(
+                    label="📥 Download Backup",
+                    data=export_data,
+                    file_name=f"expense_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
+        
+        with col2:
+            st.markdown("**📥 Import Data**")
+            uploaded_file = st.file_uploader("Choose JSON file", type=['json'])
+            if uploaded_file is not None:
+                try:
+                    json_data = uploaded_file.read().decode('utf-8')
+                    if st.button("Import Data", key="import_btn"):
+                        if splitter.import_data(json_data):
+                            st.success("Data imported successfully!")
+                            st.rerun()
+                except Exception as e:
+                    st.error(f"Error reading file: {e}")
+    
+    # ========== SECTION 3: ADD EXPENSE ==========
     st.markdown("---")
     st.markdown("### ➕ Add New Expense")
     
@@ -269,7 +389,7 @@ def main():
             st.balloons()
             st.rerun()
     
-    # ========== SECTION 3: CURRENT BALANCES ==========
+    # ========== SECTION 4: CURRENT BALANCES ==========
     if splitter.expenses:
         st.markdown("---")
         st.markdown("### 💳 Current Balances")
@@ -312,7 +432,7 @@ def main():
         with col3:
             st.metric("Active Members", len(st.session_state.members))
     
-    # ========== SECTION 4: VIEW ALL EXPENSES ==========
+    # ========== SECTION 5: VIEW ALL EXPENSES ==========
     if splitter.expenses:
         st.markdown("---")
         st.markdown("### 📋 All Expenses")
@@ -348,9 +468,37 @@ def main():
                         st.success("Expense deleted!")
                         st.rerun()
     
+    # ========== SECTION 6: CLEAR ALL DATA ==========
+    if splitter.expenses or splitter.members:
+        st.markdown("---")
+        with st.expander("🗑️ Danger Zone"):
+            st.warning("⚠️ **Warning:** This will permanently delete all your data!")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🗑️ Clear All Expenses", type="secondary"):
+                    st.session_state.expenses = []
+                    splitter.expenses = []
+                    splitter.save_data()
+                    st.success("All expenses cleared!")
+                    st.rerun()
+            
+            with col2:
+                if st.button("🗑️ Clear All Data", type="secondary"):
+                    st.session_state.expenses = []
+                    st.session_state.members = set()
+                    st.session_state.groups = {}
+                    splitter.expenses = []
+                    splitter.members = set()
+                    splitter.groups = {}
+                    splitter.save_data()
+                    st.success("All data cleared!")
+                    st.rerun()
+    
     # ========== FOOTER ==========
     st.markdown("---")
-    st.markdown("💡 **ExpenseSplit** - Your personal expense tracking solution")
+    st.markdown("💡 **ExpenseSplit** - Your personal expense tracking solution with persistent data storage")
+    st.markdown("📁 *Data is automatically saved to expense_data.json*")
 
 if __name__ == "__main__":
     main()
