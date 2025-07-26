@@ -315,21 +315,35 @@ def main():
                     paid_amounts[payers[0]] = amount
                     st.info(f"{payers[0]} paid the full amount: ${amount:.2f}")
                 else:
-                    # Multiple payers - specify amounts
-                    st.markdown("**Specify amounts paid by each person:**")
-                    total_paid = 0
-                    for payer in payers:
-                        paid_amount = st.number_input(f"Amount paid by {payer}", 
-                                                    min_value=0.0, step=0.01, 
-                                                    key=f"paid_by_{payer}")
-                        paid_amounts[payer] = paid_amount
-                        total_paid += paid_amount
+                    # Multiple payers - show two options
+                    payment_method = st.radio(
+                        "How was the payment split?", 
+                        ["Specify exact amounts", "Split payment equally among payers"],
+                        key="payment_method"
+                    )
                     
-                    # Show total and validation
-                    if total_paid > 0:
-                        st.write(f"**Total paid:** ${total_paid:.2f}")
-                        if abs(total_paid - amount) > 0.01:
-                            st.warning(f"⚠️ Total paid (${total_paid:.2f}) doesn't match expense amount (${amount:.2f})")
+                    if payment_method == "Split payment equally among payers":
+                        # Equal payment split among payers
+                        payment_per_payer = amount / len(payers)
+                        for payer in payers:
+                            paid_amounts[payer] = payment_per_payer
+                        st.info(f"Each payer paid: ${payment_per_payer:.2f}")
+                    else:
+                        # Manual payment amounts
+                        st.markdown("**Specify amounts paid by each person:**")
+                        total_paid = 0
+                        for payer in payers:
+                            paid_amount = st.number_input(f"Amount paid by {payer}", 
+                                                        min_value=0.0, step=0.01, 
+                                                        key=f"paid_by_{payer}")
+                            paid_amounts[payer] = paid_amount
+                            total_paid += paid_amount
+                        
+                        # Show total and validation
+                        if total_paid > 0:
+                            st.write(f"**Total paid:** ${total_paid:.2f}")
+                            if abs(total_paid - amount) > 0.01:
+                                st.warning(f"⚠️ Total paid (${total_paid:.2f}) doesn't match expense amount (${amount:.2f})")
         
         # Split section
         st.markdown("**🔄 How to split?**")
@@ -406,7 +420,10 @@ def main():
             (split_type == "Equal" or 
              (split_type == "Custom" and abs(sum(custom_splits.values()) - amount) < 0.01) or
              (split_type == "Ratio" and ratio_splits)) and
-            (len(payers) == 1 or abs(sum(paid_amounts.values()) - amount) < 0.01)
+            (len(payers) == 1 or 
+             (len(payers) > 1 and 'payment_method' in st.session_state and 
+              (st.session_state.payment_method == "Split payment equally among payers" or 
+               abs(sum(paid_amounts.values()) - amount) < 0.01)))
         )
         
         if st.button("✅ Add Expense", type="primary", disabled=not can_add_expense, use_container_width=True):
@@ -503,12 +520,14 @@ def main():
                     for member, amount_split in expense['splits'].items():
                         st.write(f"• {member}: ${amount_split:.2f}")
                     
-                    # Show split type for better understanding
+                    # Show split type for better understanding (with backward compatibility)
+                    split_type = expense.get('split_type', 'equal')  # Default to 'equal' for old expenses
+                    
                     if 'ratio_splits' in expense and expense.get('ratio_splits'):
                         st.write("**📊 Split type:** Ratio")
                         ratio_display = " : ".join([f"{v:.1f}" for v in expense['ratio_splits'].values()])
                         st.write(f"**Ratio:** {ratio_display}")
-                    elif expense['split_type'] == 'custom':
+                    elif split_type == 'custom':
                         st.write("**📊 Split type:** Custom amounts")
                     else:
                         st.write("**📊 Split type:** Equal split")
