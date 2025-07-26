@@ -59,7 +59,7 @@ class ExpenseSplitter:
     def add_expense(self, description: str, amount: float, paid_by: List[str], 
                    paid_amounts: Dict[str, float], split_among: List[str], 
                    split_type: str = "equal", custom_splits: Dict[str, float] = None, 
-                   group: str = "General"):
+                   ratio_splits: Dict[str, float] = None, group: str = "General"):
         """Add a new expense with multiple payers support"""
         expense_id = str(uuid.uuid4())
         
@@ -69,6 +69,11 @@ class ExpenseSplitter:
             splits = {member: split_amount for member in split_among}
         elif split_type == "custom" and custom_splits:
             splits = custom_splits
+        elif split_type == "ratio" and ratio_splits:
+            # Calculate ratio-based splits
+            total_ratio = sum(ratio_splits.values())
+            splits = {member: (ratio_splits[member] / total_ratio) * amount 
+                     for member in split_among if member in ratio_splits}
         else:
             splits = {member: 0 for member in split_among}
         
@@ -329,7 +334,7 @@ def main():
         # Split section
         st.markdown("**🔄 How to split?**")
         
-        split_type = st.radio("Split type", ["Equal", "Custom"], horizontal=True)
+        split_type = st.radio("Split type", ["Equal", "Custom", "Ratio"], horizontal=True)
         
         if split_type == "Equal":
             split_among = st.multiselect("Split equally among", list(st.session_state.members), 
@@ -360,19 +365,54 @@ def main():
                 if abs(total_custom - amount) > 0.01:
                     st.warning(f"⚠️ Custom split (${total_custom:.2f}) doesn't match expense amount (${amount:.2f})")
         
+        elif split_type == "Ratio":
+            split_among = st.multiselect("Split among", list(st.session_state.members))
+            
+            ratio_splits = {}
+            if split_among:
+                st.markdown("**Specify ratio for each person/family:**")
+                st.info("💡 **Tip**: Enter ratios like 5, 3, 2 for families of different sizes, or 1, 1, 1 for equal parts")
+                
+                cols = st.columns(min(len(split_among), 3))
+                total_ratio = 0
+                
+                for i, member in enumerate(split_among):
+                    with cols[i % 3]:
+                        ratio_value = st.number_input(f"{member} (ratio)", 
+                                                    min_value=0.1, step=0.1, 
+                                                    value=1.0,
+                                                    key=f"ratio_{member}")
+                        ratio_splits[member] = ratio_value
+                        total_ratio += ratio_value
+                
+                if total_ratio > 0:
+                    st.markdown("**📊 Ratio breakdown:**")
+                    ratio_cols = st.columns(min(len(split_among), 3))
+                    for i, (member, ratio) in enumerate(ratio_splits.items()):
+                        with ratio_cols[i % 3]:
+                            percentage = (ratio / total_ratio) * 100
+                            member_amount = (ratio / total_ratio) * amount
+                            st.write(f"**{member}**: {ratio}/{total_ratio} = {percentage:.1f}% = ${member_amount:.2f}")
+                    
+                    # Show ratio in simplified form
+                    st.info(f"💡 **Final ratio**: {' : '.join([f'{v:.1f}' for v in ratio_splits.values()])}")
+        
         # Add expense button
         can_add_expense = (
             description and 
             amount > 0 and 
             payers and 
             split_among and
-            (split_type == "Equal" or (split_type == "Custom" and abs(sum(custom_splits.values()) - amount) < 0.01)) and
+            (split_type == "Equal" or 
+             (split_type == "Custom" and abs(sum(custom_splits.values()) - amount) < 0.01) or
+             (split_type == "Ratio" and ratio_splits)) and
             (len(payers) == 1 or abs(sum(paid_amounts.values()) - amount) < 0.01)
         )
         
         if st.button("✅ Add Expense", type="primary", disabled=not can_add_expense, use_container_width=True):
             # Prepare the expense data
             final_custom_splits = custom_splits if split_type == "Custom" else None
+            final_ratio_splits = ratio_splits if split_type == "Ratio" else None
             
             expense_id = splitter.add_expense(
                 description=description,
@@ -382,6 +422,7 @@ def main():
                 split_among=split_among,
                 split_type=split_type.lower(),
                 custom_splits=final_custom_splits,
+                ratio_splits=final_ratio_splits,
                 group=selected_group
             )
             
@@ -459,8 +500,18 @@ def main():
                 
                 with col2:
                     st.write("**🔄 Split details:**")
-                    for member, amount in expense['splits'].items():
-                        st.write(f"• {member}: ${amount:.2f}")
+                    for member, amount_split in expense['splits'].items():
+                        st.write(f"• {member}: ${amount_split:.2f}")
+                    
+                    # Show split type for better understanding
+                    if 'ratio_splits' in expense and expense.get('ratio_splits'):
+                        st.write("**📊 Split type:** Ratio")
+                        ratio_display = " : ".join([f"{v:.1f}" for v in expense['ratio_splits'].values()])
+                        st.write(f"**Ratio:** {ratio_display}")
+                    elif expense['split_type'] == 'custom':
+                        st.write("**📊 Split type:** Custom amounts")
+                    else:
+                        st.write("**📊 Split type:** Equal split")
                 
                 with col3:
                     if st.button(f"🗑️ Delete", key=f"delete_{expense['id']}", type="secondary"):
